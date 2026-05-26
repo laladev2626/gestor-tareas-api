@@ -94,6 +94,7 @@ class TestGetTask:
         """Id no numerico devuelve 422."""
         resp = client.get("/tasks/abc")
         assert resp.status_code == 422
+        assert "detail" in resp.json()
 
     def test_get_existing(self, client):
         """Recupera una tarea existente con todos sus campos."""
@@ -115,21 +116,31 @@ class TestCreateTask:
         """Falta el campo obligatorio title; devuelve 422."""
         resp = client.post("/tasks/", json={})
         assert resp.status_code == 422
+        assert "detail" in resp.json()
 
     def test_null_title(self, client):
         """Title explicito como null; devuelve 422."""
         resp = client.post("/tasks/", json={"title": None})
         assert resp.status_code == 422
+        assert "detail" in resp.json()
 
     def test_invalid_status(self, client):
         """Estado no permitido en el enum; devuelve 422."""
-        resp = client.post("/tasks/", json={"title": "X", "status": "invalid"})
+        resp = client.post(
+            "/tasks/", json={"title": "X", "status": "invalid"}
+        )
         assert resp.status_code == 422
+        assert "detail" in resp.json()
 
     def test_invalid_body_not_json(self, client):
         """Cuerpo que no es JSON valido; devuelve 422."""
-        resp = client.post("/tasks/", content="not-json", headers={"Content-Type": "application/json"})
+        resp = client.post(
+            "/tasks/",
+            content="not-json",
+            headers={"Content-Type": "application/json"},
+        )
         assert resp.status_code == 422
+        assert "detail" in resp.json()
 
     def test_create_defaults(self, client):
         """Crea tarea solo con titulo; status default pending, description null."""
@@ -181,13 +192,17 @@ class TestUpdateTask:
     def test_invalid_status(self, client):
         """Estado no valido en el enum; devuelve 422."""
         created = _create_task(client)
-        resp = client.patch(f"/tasks/{created['id']}", json={"status": "bad"})
+        resp = client.patch(
+            f"/tasks/{created['id']}", json={"status": "bad"}
+        )
         assert resp.status_code == 422
+        assert "detail" in resp.json()
 
     def test_invalid_id_type(self, client):
         """Id no numerico en PATCH; devuelve 422."""
         resp = client.patch("/tasks/abc", json={"title": "X"})
         assert resp.status_code == 422
+        assert "detail" in resp.json()
 
     def test_empty_body(self, client):
         """Body vacio no modifica nada; devuelve 200 con datos sin cambios."""
@@ -258,6 +273,7 @@ class TestDeleteTask:
         """Id no numerico en DELETE; devuelve 422."""
         resp = client.delete("/tasks/abc")
         assert resp.status_code == 422
+        assert "detail" in resp.json()
 
     def test_delete_existing(self, client):
         """Elimina tarea y devuelve 204 sin cuerpo."""
