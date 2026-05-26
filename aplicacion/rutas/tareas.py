@@ -2,7 +2,7 @@
 
 from typing import List
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Path, status
 from sqlalchemy.orm import Session
 
 from aplicacion.base_de_datos import get_db
@@ -13,6 +13,15 @@ from aplicacion.modelos import Task
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 
 
+def _get_task_or_404(task_id: int, db: Session) -> Task:
+    task = db.query(Task).filter(Task.id == task_id).first()
+    if task is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Task not found"
+        )
+    return task
+
+
 # Devuelve la lista completa de tareas almacenadas
 @router.get("/", response_model=List[TaskResponse])
 def list_tasks(db: Session = Depends(get_db)):
@@ -21,15 +30,8 @@ def list_tasks(db: Session = Depends(get_db)):
 
 # Devuelve una tarea por su identificador; 404 si no existe
 @router.get("/{task_id}", response_model=TaskResponse)
-def get_task(task_id: int, db: Session = Depends(get_db)):
-    # Buscar tarea por id y devolver 404 si no existe
-    if task_id <= 0:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid task id")
-    task = db.query(Task).filter(Task.id == task_id).first()
-    if task is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
-
-    return task
+def get_task(task_id: int = Path(ge=1), db: Session = Depends(get_db)):
+    return _get_task_or_404(task_id, db)
 
 
 # Crea una nueva tarea y devuelve el recurso creado con código 201
@@ -44,14 +46,8 @@ def create_task(payload: TaskCreate, db: Session = Depends(get_db)):
 
 # Actualiza parcialmente una tarea; solo modifica los campos enviados en el cuerpo
 @router.patch("/{task_id}", response_model=TaskResponse)
-def update_task(task_id: int, payload: TaskUpdate, db: Session = Depends(get_db)):
-    # Buscar tarea por id y devolver 404 si no existe
-    if task_id <= 0:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid task id")
-    task = db.query(Task).filter(Task.id == task_id).first()
-    if task is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
-
+def update_task(*, task_id: int = Path(ge=1), payload: TaskUpdate, db: Session = Depends(get_db)):
+    task = _get_task_or_404(task_id, db)
     for field, value in payload.model_dump(exclude_unset=True).items():
         setattr(task, field, value)
     db.commit()
@@ -61,13 +57,7 @@ def update_task(task_id: int, payload: TaskUpdate, db: Session = Depends(get_db)
 
 # Elimina una tarea de la base de datos; devuelve 204 sin cuerpo
 @router.delete("/{task_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_task(task_id: int, db: Session = Depends(get_db)):
-    # Buscar tarea por id y devolver 404 si no existe
-    if task_id <= 0:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid task id")
-    task = db.query(Task).filter(Task.id == task_id).first()
-    if task is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
-
+def delete_task(task_id: int = Path(ge=1), db: Session = Depends(get_db)):
+    task = _get_task_or_404(task_id, db)
     db.delete(task)
     db.commit()
