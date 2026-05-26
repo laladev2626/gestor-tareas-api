@@ -100,17 +100,48 @@ def test_listar_tareas_con_datos(client):
 
 
 # ---------------------------------------------------------------------------
-# TODO: casos de error — pendientes de implementar
+# Casos de error
 # ---------------------------------------------------------------------------
 
-# def test_crear_tarea_titulo_vacio(client):
-#     # Debería devolver 422 cuando el título está vacío o tiene menos de 3 caracteres
-#     pass
+def test_crear_tarea_titulo_vacio(client):
+    # Debería devolver 422 cuando el título está vacío o tiene menos de 3 caracteres
+    response_vacio = client.post("/tasks/", json={"title": ""})
+    response_corto = client.post("/tasks/", json={"title": "ab"})
 
-# def test_obtener_tarea_no_encontrada(client):
-#     # Debería devolver 404 cuando el id no existe
-#     pass
+    assert response_vacio.status_code == 422
+    assert response_corto.status_code == 422
 
-# def test_actualizar_tarea_completada(client):
-#     # Debería devolver 400 cuando se intenta modificar una tarea con estado "done"
-#     pass
+
+def test_obtener_tarea_no_encontrada(client):
+    # Debería devolver 404 cuando el id no existe
+    response = client.get("/tasks/9999")
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Task not found"
+
+
+def test_actualizar_tarea_completada(client):
+    # Debería devolver 400 cuando se intenta modificar una tarea con estado "done"
+    crear = client.post("/tasks/", json={"title": "Tarea terminada", "status": "done"})
+    task_id = crear.json()["id"]
+
+    response = client.patch(f"/tasks/{task_id}", json={"title": "Nuevo título"})
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Cannot modify a completed task"
+
+
+def test_actualizar_tarea_no_encontrada(client):
+    # Debería devolver 404 cuando se intenta actualizar una tarea con id inexistente
+    response = client.patch("/tasks/9999", json={"title": "Inexistente"})
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Task not found"
+
+
+def test_eliminar_tarea_no_encontrada(client):
+    # Debería devolver 404 cuando se intenta eliminar una tarea con id inexistente
+    response = client.delete("/tasks/9999")
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Task not found"
