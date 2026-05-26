@@ -1,15 +1,4 @@
-# Tests de la API de gestión de tareas con pytest y FastAPI TestClient
-#
-# COBERTURA ACTUAL: solo happy path básico
-#   - POST /tasks  → crear tarea correctamente
-#   - GET  /tasks  → listar tareas
-#
-# PENDIENTE DE CUBRIR:
-#   - POST /tasks con título vacío o menor de 3 caracteres (error 422)
-#   - GET  /tasks/{id} con id inexistente (error 404)
-#   - PATCH /tasks/{id} sobre una tarea con estado "done" (error 400)
-#   - PATCH /tasks/{id} con id inexistente (error 404)
-#   - DELETE /tasks/{id} con id inexistente (error 404)
+# Tests para los endpoints de tareas: prioridad en casos de error y casos limite
 
 import pytest
 from fastapi.testclient import TestClient
@@ -20,97 +9,319 @@ from sqlalchemy.pool import StaticPool
 from aplicacion.base_de_datos import Base, get_db
 from aplicacion.principal import app
 
-# StaticPool garantiza que todas las sesiones comparten la misma conexión en memoria;
-# sin él cada sesión abriría una conexión nueva y vería una base de datos vacía distinta
+
+# Motor en memoria con StaticPool para aislamiento total entre tests
 engine_test = create_engine(
     "sqlite:///:memory:",
     connect_args={"check_same_thread": False},
     poolclass=StaticPool,
 )
-TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine_test)
+TestSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine_test)
 
 
-def override_get_db():
-    # Sustituye la dependencia de BD real por la sesión de test
-    db = TestingSessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
-
-
-@pytest.fixture
+@pytest.fixture()
 def client():
-    # 1. Crear tablas en el engine de test antes de instanciar el TestClient;
-    #    principal.py ya no llama create_all al importarse (usa lifespan),
-    #    así que aquí tenemos control total sobre qué engine se usa
+    """Crea las tablas antes de cada test y las destruye despues."""
     Base.metadata.create_all(bind=engine_test)
 
-    # 2. Sobreescribir la dependencia de BD para que todas las peticiones usen engine_test
-    app.dependency_overrides[get_db] = override_get_db
+    def _override_get_db():
+        db = TestSessionLocal()
+        try:
+            yield db
+        finally:
+            db.close()
 
-    # 3. TestClient sin context manager: no dispara el lifespan de la app,
-    #    evitando que el create_all de producción interfiera con engine_test
+    app.dependency_overrides[get_db] = _override_get_db
     yield TestClient(app)
-
-    # 4. Limpieza al terminar cada test
     app.dependency_overrides.clear()
     Base.metadata.drop_all(bind=engine_test)
 
 
 # ---------------------------------------------------------------------------
-# Happy path: crear tarea
+# Helpers
 # ---------------------------------------------------------------------------
-
-def test_crear_tarea_correctamente(client):
-    # Verifica que una tarea válida se crea y devuelve los campos esperados
-    payload = {"title": "Tarea de prueba", "description": "Descripción de ejemplo"}
-    response = client.post("/tasks/", json=payload)
-
-    assert response.status_code == 201
-    data = response.json()
-    assert data["title"] == "Tarea de prueba"
-    assert data["description"] == "Descripción de ejemplo"
-    assert data["status"] == "pending"
-    assert "id" in data
-    assert "created_at" in data
+def _create_task(client, **overrides):
+    """Crea una tarea con valores por defecto y devuelve la respuesta JSON."""
+    payload = {"title": "Tarea de prueba", **overrides}
+    resp = client.post("/tasks/", json=payload)
+    assert resp.status_code == 201
+    return resp.json()
 
 
-# ---------------------------------------------------------------------------
-# Happy path: listar tareas
-# ---------------------------------------------------------------------------
+# ===========================================================================
+# GET /tasks/ — casos de error y limite
+# ===========================================================================
+class TestListTasks:
+    def test_list_empty(self, client):
+        """Lista vacia cuando no hay tareas."""
+        resp = client.get("/tasks/")
+        assert resp.status_code == 200
+        assert resp.json() == []
 
-def test_listar_tareas_vacio(client):
-    # Sin tareas creadas la respuesta debe ser una lista vacía
-    response = client.get("/tasks/")
-
-    assert response.status_code == 200
-    assert response.json() == []
-
-
-def test_listar_tareas_con_datos(client):
-    # Crea dos tareas y comprueba que ambas aparecen en el listado
-    client.post("/tasks/", json={"title": "Primera tarea"})
-    client.post("/tasks/", json={"title": "Segunda tarea"})
-
-    response = client.get("/tasks/")
-
-    assert response.status_code == 200
-    assert len(response.json()) == 2
+    def test_list_multiple(self, client):
+        """Devuelve todas las tareas creadas."""
+        _create_task(client, title="Primera")
+        _create_task(client, title="Segunda")
+        resp = client.get("/tasks/")
+        assert resp.status_code == 200
+        assert len(resp.json()) == 2
 
 
-# ---------------------------------------------------------------------------
-# TODO: casos de error — pendientes de implementar
-# ---------------------------------------------------------------------------
+# ===========================================================================
+# GET /tasks/{task_id} — casos de error y limite
+# ===========================================================================
+class TestGetTask:
+    def test_not_found(self, client):
+        """404 con detail correcto si el id no existe."""
+        resp = client.get("/tasks/999")
+        assert resp.status_code == 404
+        assert resp.json()["detail"] == "Task not found"
 
-# def test_crear_tarea_titulo_vacio(client):
-#     # Debería devolver 422 cuando el título está vacío o tiene menos de 3 caracteres
-#     pass
+    def test_not_found_zero_id(self, client):
+        """Id 0 no existe; devuelve 404."""
+        resp = client.get("/tasks/0")
+        assert resp.status_code == 404
+        assert resp.json()["detail"] == "Task not found"
 
-# def test_obtener_tarea_no_encontrada(client):
-#     # Debería devolver 404 cuando el id no existe
-#     pass
+    def test_not_found_negative_id(self, client):
+        """Id negativo no existe; devuelve 404."""
+        resp = client.get("/tasks/-1")
+        assert resp.status_code == 404
+        assert resp.json()["detail"] == "Task not found"
 
-# def test_actualizar_tarea_completada(client):
-#     # Debería devolver 400 cuando se intenta modificar una tarea con estado "done"
-#     pass
+    def test_invalid_id_type(self, client):
+        """Id no numerico devuelve 422."""
+        resp = client.get("/tasks/abc")
+        assert resp.status_code == 422
+        assert "detail" in resp.json()
+
+    def test_get_existing(self, client):
+        """Recupera una tarea existente con todos sus campos."""
+        created = _create_task(client)
+        resp = client.get(f"/tasks/{created['id']}")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["id"] == created["id"]
+        assert data["title"] == created["title"]
+        assert data["status"] == "pending"
+        assert "created_at" in data
+
+
+# ===========================================================================
+# POST /tasks/ — casos de error y limite
+# ===========================================================================
+class TestCreateTask:
+    def test_missing_title(self, client):
+        """Falta el campo obligatorio title; devuelve 422."""
+        resp = client.post("/tasks/", json={})
+        assert resp.status_code == 422
+        assert "detail" in resp.json()
+
+    def test_null_title(self, client):
+        """Title explicito como null; devuelve 422."""
+        resp = client.post("/tasks/", json={"title": None})
+        assert resp.status_code == 422
+        assert "detail" in resp.json()
+
+    def test_title_too_short(self, client):
+        """Titulo con menos de 3 caracteres; devuelve 422."""
+        resp_empty = client.post("/tasks/", json={"title": ""})
+        resp_short = client.post("/tasks/", json={"title": "ab"})
+        assert resp_empty.status_code == 422
+        assert "detail" in resp_empty.json()
+        assert resp_short.status_code == 422
+        assert "detail" in resp_short.json()
+
+    def test_invalid_status(self, client):
+        """Estado no permitido en el enum; devuelve 422."""
+        resp = client.post(
+            "/tasks/", json={"title": "Valida", "status": "invalid"}
+        )
+        assert resp.status_code == 422
+        assert "detail" in resp.json()
+
+    def test_invalid_body_not_json(self, client):
+        """Cuerpo que no es JSON valido; devuelve 422."""
+        resp = client.post(
+            "/tasks/",
+            content="not-json",
+            headers={"Content-Type": "application/json"},
+        )
+        assert resp.status_code == 422
+        assert "detail" in resp.json()
+
+    def test_create_defaults(self, client):
+        """Crea tarea solo con titulo; status default pending."""
+        data = _create_task(client)
+        assert data["status"] == "pending"
+        assert data["description"] is None
+        assert "id" in data
+        assert "created_at" in data
+
+    def test_create_all_fields(self, client):
+        """Crea tarea con todos los campos explicitos."""
+        data = _create_task(
+            client,
+            title="Completa",
+            description="Desc",
+            status="in_progress",
+        )
+        assert data["title"] == "Completa"
+        assert data["description"] == "Desc"
+        assert data["status"] == "in_progress"
+
+    def test_create_with_done_status(self, client):
+        """Permite crear directamente con status done."""
+        data = _create_task(client, status="done")
+        assert data["status"] == "done"
+
+    def test_create_empty_description(self, client):
+        """Descripcion como cadena vacia se acepta."""
+        data = _create_task(client, description="")
+        assert data["description"] == ""
+
+    def test_create_long_title(self, client):
+        """Titulo con 255 caracteres se acepta."""
+        title = "A" * 255
+        data = _create_task(client, title=title)
+        assert data["title"] == title
+
+
+# ===========================================================================
+# PATCH /tasks/{task_id} — casos de error y limite
+# ===========================================================================
+class TestUpdateTask:
+    def test_not_found(self, client):
+        """404 con detail al intentar actualizar tarea inexistente."""
+        resp = client.patch("/tasks/999", json={"title": "Valida"})
+        assert resp.status_code == 404
+        assert resp.json()["detail"] == "Task not found"
+
+    def test_update_completed_task(self, client):
+        """400 al intentar modificar una tarea con estado done."""
+        created = _create_task(client, status="done")
+        resp = client.patch(
+            f"/tasks/{created['id']}", json={"title": "Nuevo"}
+        )
+        assert resp.status_code == 400
+        assert resp.json()["detail"] == "Cannot modify a completed task"
+
+    def test_invalid_status(self, client):
+        """Estado no valido en el enum; devuelve 422."""
+        created = _create_task(client)
+        resp = client.patch(
+            f"/tasks/{created['id']}", json={"status": "bad"}
+        )
+        assert resp.status_code == 422
+        assert "detail" in resp.json()
+
+    def test_invalid_id_type(self, client):
+        """Id no numerico en PATCH; devuelve 422."""
+        resp = client.patch("/tasks/abc", json={"title": "Valida"})
+        assert resp.status_code == 422
+        assert "detail" in resp.json()
+
+    def test_title_too_short_via_patch(self, client):
+        """No permite actualizar titulo a menos de 3 caracteres."""
+        created = _create_task(client)
+        resp = client.patch(
+            f"/tasks/{created['id']}", json={"title": "ab"}
+        )
+        assert resp.status_code == 422
+        assert "detail" in resp.json()
+
+    def test_empty_body(self, client):
+        """Body vacio no modifica nada; devuelve 200 sin cambios."""
+        created = _create_task(client, title="Original")
+        resp = client.patch(f"/tasks/{created['id']}", json={})
+        assert resp.status_code == 200
+        assert resp.json()["title"] == "Original"
+
+    def test_update_title(self, client):
+        """Actualiza solo el titulo."""
+        created = _create_task(client, title="Viejo titulo")
+        resp = client.patch(
+            f"/tasks/{created['id']}", json={"title": "Nuevo titulo"}
+        )
+        assert resp.status_code == 200
+        assert resp.json()["title"] == "Nuevo titulo"
+        assert resp.json()["description"] == created["description"]
+
+    def test_update_description(self, client):
+        """Actualiza solo la descripcion."""
+        created = _create_task(client, description="Vieja")
+        resp = client.patch(
+            f"/tasks/{created['id']}", json={"description": "Nueva"}
+        )
+        assert resp.status_code == 200
+        assert resp.json()["description"] == "Nueva"
+
+    def test_update_status(self, client):
+        """Actualiza solo el estado."""
+        created = _create_task(client)
+        resp = client.patch(
+            f"/tasks/{created['id']}", json={"status": "in_progress"}
+        )
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "in_progress"
+
+    def test_update_multiple_fields(self, client):
+        """Actualiza titulo y estado a la vez."""
+        created = _create_task(client)
+        resp = client.patch(
+            f"/tasks/{created['id']}",
+            json={"title": "Multi campo", "status": "in_progress"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["title"] == "Multi campo"
+        assert data["status"] == "in_progress"
+
+    def test_set_description_to_null(self, client):
+        """Permite establecer description a null explicitamente."""
+        created = _create_task(client, description="Algo")
+        resp = client.patch(
+            f"/tasks/{created['id']}", json={"description": None}
+        )
+        assert resp.status_code == 200
+        assert resp.json()["description"] is None
+
+
+# ===========================================================================
+# DELETE /tasks/{task_id} — casos de error y limite
+# ===========================================================================
+class TestDeleteTask:
+    def test_not_found(self, client):
+        """404 con detail al intentar eliminar tarea inexistente."""
+        resp = client.delete("/tasks/999")
+        assert resp.status_code == 404
+        assert resp.json()["detail"] == "Task not found"
+
+    def test_invalid_id_type(self, client):
+        """Id no numerico en DELETE; devuelve 422."""
+        resp = client.delete("/tasks/abc")
+        assert resp.status_code == 422
+        assert "detail" in resp.json()
+
+    def test_delete_existing(self, client):
+        """Elimina tarea y devuelve 204 sin cuerpo."""
+        created = _create_task(client)
+        resp = client.delete(f"/tasks/{created['id']}")
+        assert resp.status_code == 204
+        assert resp.content == b""
+
+    def test_delete_then_get_returns_404(self, client):
+        """Tras eliminar, la tarea ya no es accesible."""
+        created = _create_task(client)
+        client.delete(f"/tasks/{created['id']}")
+        resp = client.get(f"/tasks/{created['id']}")
+        assert resp.status_code == 404
+        assert resp.json()["detail"] == "Task not found"
+
+    def test_double_delete(self, client):
+        """Eliminar dos veces la misma tarea; la segunda devuelve 404."""
+        created = _create_task(client)
+        client.delete(f"/tasks/{created['id']}")
+        resp = client.delete(f"/tasks/{created['id']}")
+        assert resp.status_code == 404
+        assert resp.json()["detail"] == "Task not found"
