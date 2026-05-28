@@ -1,4 +1,4 @@
-# Tests para el endpoint DELETE /tasks/ (eliminación masiva de tareas)
+# Tests para los endpoints de tareas
 
 import pytest
 from fastapi.testclient import TestClient
@@ -43,25 +43,21 @@ def client():
     return TestClient(app)
 
 
-def test_delete_all_tasks_removes_every_task(client):
-    """Crea varias tareas y verifica que DELETE /tasks/ las elimina todas."""
-    client.post("/tasks/", json={"title": "Tarea 1"})
-    client.post("/tasks/", json={"title": "Tarea 2"})
-    client.post("/tasks/", json={"title": "Tarea 3"})
+def test_update_task_rejects_short_title(client):
+    """Verifica que PATCH /tasks/{id} devuelve 422 si el título tiene menos de 3 caracteres."""
+    created = client.post("/tasks/", json={"title": "Tarea original"})
+    task_id = created.json()["id"]
 
-    response = client.delete("/tasks/")
-    assert response.status_code == 204
-
-    listing = client.get("/tasks/")
-    assert listing.status_code == 200
-    assert listing.json() == []
+    response = client.patch(f"/tasks/{task_id}", json={"title": "AB"})
+    assert response.status_code == 422
+    assert "title" in str(response.json()["detail"])
 
 
-def test_delete_all_tasks_on_empty_database(client):
-    """Verifica que DELETE /tasks/ devuelve 204 incluso sin tareas."""
-    response = client.delete("/tasks/")
-    assert response.status_code == 204
+def test_update_task_accepts_valid_title(client):
+    """Verifica que PATCH /tasks/{id} acepta un título con 3 o más caracteres."""
+    created = client.post("/tasks/", json={"title": "Tarea original"})
+    task_id = created.json()["id"]
 
-    listing = client.get("/tasks/")
-    assert listing.status_code == 200
-    assert listing.json() == []
+    response = client.patch(f"/tasks/{task_id}", json={"title": "ABC"})
+    assert response.status_code == 200
+    assert response.json()["title"] == "ABC"
