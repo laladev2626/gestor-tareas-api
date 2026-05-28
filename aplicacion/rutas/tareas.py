@@ -98,6 +98,17 @@ def update_task(task_id: int, payload: TaskUpdate, db: Session = Depends(get_db)
     return task
 
 
+@router.delete("/", status_code=status.HTTP_204_NO_CONTENT)
+def delete_all_tasks(db: Session = Depends(get_db)):
+    """Elimina todas las tareas de la base de datos.
+
+    Args:
+        db (Session): Sesión de base de datos inyectada por dependencia.
+    """
+    db.query(Task).delete()
+    db.commit()
+
+
 @router.delete("/{task_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_task(task_id: int, db: Session = Depends(get_db)):
     """Elimina una tarea de la base de datos.
