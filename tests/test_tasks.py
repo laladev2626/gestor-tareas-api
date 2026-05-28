@@ -61,3 +61,66 @@ def test_update_task_accepts_valid_title(client):
     response = client.patch(f"/tasks/{task_id}", json={"title": "ABC"})
     assert response.status_code == 200
     assert response.json()["title"] == "ABC"
+
+
+def test_create_task_with_description(client):
+    """Verifica que POST /tasks/ acepta una descripción válida."""
+    response = client.post(
+        "/tasks/",
+        json={"title": "Tarea con desc", "description": "Descripción de ejemplo"},
+    )
+    assert response.status_code == 201
+    assert response.json()["description"] == "Descripción de ejemplo"
+
+
+def test_create_task_without_description(client):
+    """Verifica que POST /tasks/ permite omitir la descripción."""
+    response = client.post("/tasks/", json={"title": "Sin descripción"})
+    assert response.status_code == 201
+    assert response.json()["description"] is None
+
+
+def test_create_task_rejects_description_over_500(client):
+    """Verifica que POST /tasks/ devuelve 422 si la descripción supera 500 caracteres."""
+    long_desc = "a" * 501
+    response = client.post(
+        "/tasks/", json={"title": "Tarea larga", "description": long_desc},
+    )
+    assert response.status_code == 422
+    assert "description" in str(response.json()["detail"])
+
+
+def test_create_task_accepts_description_of_500(client):
+    """Verifica que POST /tasks/ acepta una descripción de exactamente 500 caracteres."""
+    desc_500 = "a" * 500
+    response = client.post(
+        "/tasks/", json={"title": "Tarea límite", "description": desc_500},
+    )
+    assert response.status_code == 201
+    assert response.json()["description"] == desc_500
+
+
+def test_update_task_rejects_description_over_500(client):
+    """Verifica que PATCH /tasks/{id} devuelve 422 si la descripción supera 500 caracteres."""
+    created = client.post("/tasks/", json={"title": "Tarea original"})
+    task_id = created.json()["id"]
+
+    long_desc = "a" * 501
+    response = client.patch(
+        f"/tasks/{task_id}", json={"description": long_desc},
+    )
+    assert response.status_code == 422
+    assert "description" in str(response.json()["detail"])
+
+
+def test_update_task_accepts_description_of_500(client):
+    """Verifica que PATCH /tasks/{id} acepta una descripción de exactamente 500 caracteres."""
+    created = client.post("/tasks/", json={"title": "Tarea original"})
+    task_id = created.json()["id"]
+
+    desc_500 = "a" * 500
+    response = client.patch(
+        f"/tasks/{task_id}", json={"description": desc_500},
+    )
+    assert response.status_code == 200
+    assert response.json()["description"] == desc_500
