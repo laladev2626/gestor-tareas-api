@@ -22,6 +22,15 @@ class TaskPriority(str, enum.Enum):
     high = "high"
 
 
+# Enumeración con las categorías de una tarea
+class TaskCategory(str, enum.Enum):
+    trabajo = "trabajo"
+    personal = "personal"
+    estudio = "estudio"
+    hogar = "hogar"
+    otro = "otro"
+
+
 # Modelo que representa la tabla "tasks" en la base de datos
 class Task(Base):
     __tablename__ = "tasks"
@@ -31,5 +40,6 @@ class Task(Base):
     description = Column(String, nullable=True)
     status = Column(Enum(TaskStatus), default=TaskStatus.pending, nullable=False)
     priority = Column(Enum(TaskPriority), default=TaskPriority.medium, nullable=False)
+    category = Column(Enum(TaskCategory), default=TaskCategory.otro, nullable=False)
     # La fecha de creación se asigna automáticamente al insertar el registro
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
