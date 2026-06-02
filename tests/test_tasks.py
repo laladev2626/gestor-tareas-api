@@ -106,3 +106,48 @@ def test_update_task_invalid_priority(client):
     response = client.patch(f"/tasks/{task_id}", json={"priority": "critical"})
     assert response.status_code == 422
     assert "priority" in str(response.json()["detail"])
+
+
+def test_create_task_default_category(client):
+    """Verifica que POST /tasks/ asigna categoría 'otro' por defecto."""
+    response = client.post("/tasks/", json={"title": "Sin categoría explícita"})
+    assert response.status_code == 201
+    assert response.json()["category"] == "otro"
+
+
+def test_create_task_with_explicit_category(client):
+    """Verifica que POST /tasks/ acepta una categoría explícita."""
+    response = client.post(
+        "/tasks/", json={"title": "Tarea de trabajo", "category": "trabajo"},
+    )
+    assert response.status_code == 201
+    assert response.json()["category"] == "trabajo"
+
+
+def test_create_task_invalid_category(client):
+    """Verifica que POST /tasks/ devuelve 422 con una categoría no válida."""
+    response = client.post(
+        "/tasks/", json={"title": "Tarea", "category": "finanzas"},
+    )
+    assert response.status_code == 422
+    assert "category" in str(response.json()["detail"])
+
+
+def test_update_task_category(client):
+    """Verifica que PATCH /tasks/{id} permite cambiar la categoría."""
+    created = client.post("/tasks/", json={"title": "Tarea"})
+    task_id = created.json()["id"]
+
+    response = client.patch(f"/tasks/{task_id}", json={"category": "personal"})
+    assert response.status_code == 200
+    assert response.json()["category"] == "personal"
+
+
+def test_update_task_invalid_category(client):
+    """Verifica que PATCH /tasks/{id} devuelve 422 con una categoría no válida."""
+    created = client.post("/tasks/", json={"title": "Tarea"})
+    task_id = created.json()["id"]
+
+    response = client.patch(f"/tasks/{task_id}", json={"category": "deportes"})
+    assert response.status_code == 422
+    assert "category" in str(response.json()["detail"])
