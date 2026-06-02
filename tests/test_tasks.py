@@ -63,6 +63,7 @@ def test_update_task_accepts_valid_title(client):
     assert response.json()["title"] == "ABC"
 
 
+
 def test_create_task_with_description(client):
     """Verifica que POST /tasks/ acepta una descripción válida."""
     response = client.post(
@@ -124,3 +125,48 @@ def test_update_task_accepts_description_of_500(client):
     )
     assert response.status_code == 200
     assert response.json()["description"] == desc_500
+
+
+def test_create_task_default_priority(client):
+    """Verifica que POST /tasks/ asigna prioridad medium por defecto."""
+    response = client.post("/tasks/", json={"title": "Sin prioridad explícita"})
+    assert response.status_code == 201
+    assert response.json()["priority"] == "medium"
+
+
+def test_create_task_with_explicit_priority(client):
+    """Verifica que POST /tasks/ acepta una prioridad explícita."""
+    response = client.post(
+        "/tasks/", json={"title": "Tarea urgente", "priority": "high"},
+    )
+    assert response.status_code == 201
+    assert response.json()["priority"] == "high"
+
+
+def test_create_task_invalid_priority(client):
+    """Verifica que POST /tasks/ devuelve 422 con una prioridad no válida."""
+    response = client.post(
+        "/tasks/", json={"title": "Tarea", "priority": "urgent"},
+    )
+    assert response.status_code == 422
+    assert "priority" in str(response.json()["detail"])
+
+
+def test_update_task_priority(client):
+    """Verifica que PATCH /tasks/{id} permite cambiar la prioridad."""
+    created = client.post("/tasks/", json={"title": "Tarea"})
+    task_id = created.json()["id"]
+
+    response = client.patch(f"/tasks/{task_id}", json={"priority": "low"})
+    assert response.status_code == 200
+    assert response.json()["priority"] == "low"
+
+
+def test_update_task_invalid_priority(client):
+    """Verifica que PATCH /tasks/{id} devuelve 422 con una prioridad no válida."""
+    created = client.post("/tasks/", json={"title": "Tarea"})
+    task_id = created.json()["id"]
+
+    response = client.patch(f"/tasks/{task_id}", json={"priority": "critical"})
+    assert response.status_code == 422
+    assert "priority" in str(response.json()["detail"])
