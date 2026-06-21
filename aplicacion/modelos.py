@@ -37,7 +37,7 @@ class Task(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     title = Column(String(255), nullable=False)
-    description = Column(String, nullable=True)
+    description = Column(String(500), nullable=True)
     status = Column(Enum(TaskStatus), default=TaskStatus.pending, nullable=False)
     priority = Column(Enum(TaskPriority), default=TaskPriority.medium, nullable=False)
     category = Column(Enum(TaskCategory), default=TaskCategory.otro, nullable=False)
